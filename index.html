@@ -48,7 +48,11 @@
   .reel .strip div { height:32px; line-height:32px; text-align:center; font-size:20px; color:#9fc3cc; opacity:.75; }
   .reel::after { content:""; position:absolute; left:0; right:0; top:32px; height:32px; background:rgba(244,201,93,.14); border-top:1px solid var(--gold); border-bottom:1px solid var(--gold); }
   .seat.spin { color:var(--gold); text-shadow:0 0 10px rgba(244,201,93,.6); }
-  .seat.done { color:#fff; text-shadow:0 0 12px rgba(244,201,93,.8); animation:pop .6s; }
+  .seat.done { color:#fff; animation:pop .6s; }
+  .tag { display:inline-block; padding:0 14px; line-height:30px; border-radius:16px; font-size:20px; color:#0d2b33; box-shadow:0 2px 8px rgba(0,0,0,.35); }
+  .seat.snap .tag { animation:slidein .5s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes slidein { from{ opacity:0; transform:translateX(40px) scale(.8); } to{ opacity:1; transform:none; } }
+  .chip { border-left-width:10px; }
   .bed.active { border-color:var(--gold); border-style:solid; box-shadow:0 0 18px rgba(244,201,93,.3); }
   .bed.filled { border-style:solid; border-color:#c9a64a; background:linear-gradient(90deg,#10343e,#2b4a3a); }
   @keyframes pop { 0%{transform:scale(1)} 35%{transform:scale(1.15)} 100%{transform:scale(1)} }
@@ -97,7 +101,12 @@ let busy = false, soundOn = true, actx = null;
 
 /* ---------- 畫面 ---------- */
 function getPeople(){ return $("names").value.split(/[\n,，、]+/).map(s=>s.trim()).filter(Boolean); }
-function renderPeople(){ $("people").innerHTML = getPeople().map(p=>`<span class="chip">${p}</span>`).join(""); }
+// 每個人一個固定顏色（依名單順序）
+const PALETTE = ["#ff8a80","#ffd54f","#7fdc9b","#6ec6ff","#b794f6","#ffa15c","#f78fb3","#4dd0c4","#c6e05a","#a8b8d8"];
+const esc = s => s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const colorOf = n => PALETTE[Math.max(0,getPeople().indexOf(n)) % PALETTE.length];
+const tagHtml = n => `<span class="tag" style="background:${colorOf(n)}">${esc(n)}</span>`;
+function renderPeople(){ $("people").innerHTML = getPeople().map(p=>`<span class="chip" style="border-left-color:${colorOf(p)}">${esc(p)}</span>`).join(""); }
 function renderLodge(li){
   const l = lodgings[li];
   $("lodge-"+li).querySelector(".beds").innerHTML = l.beds.map((b,bi)=>`
@@ -175,7 +184,7 @@ async function spin(seat, bed, pool, winner){
   }
   const reel = document.createElement("div"); reel.className = "reel";
   const strip = document.createElement("div"); strip.className = "strip";
-  strip.innerHTML = items.map(n=>`<div>${n}</div>`).join("");
+  strip.innerHTML = items.map(n=>`<div style="color:${colorOf(n)}">${esc(n)}</div>`).join("");
   reel.appendChild(strip); seat.appendChild(reel);
   const total = N-3, dur = 4200 + Math.random()*800, t0 = performance.now();
   let last = -1;
@@ -189,11 +198,21 @@ async function spin(seat, bed, pool, winner){
     requestAnimationFrame(f);
   });
   await sleep(250);
-  seat.textContent = winner;
+  seat.innerHTML = tagHtml(winner);
   seat.classList.remove("spin","rolling"); seat.classList.add("done");
   ding();
   const r = seat.getBoundingClientRect(); burst(r.right-30, r.top+r.height/2, 35);
   await sleep(450);
+}
+
+// 最後一人：直接滑入，不跑跑馬燈
+async function settle(seat, bed, winner){
+  bed.classList.add("active");
+  seat.classList.add("done","snap");
+  seat.innerHTML = tagHtml(winner);
+  ding();
+  const r = seat.getBoundingClientRect(); burst(r.right-30, r.top+r.height/2, 20);
+  await sleep(800);
 }
 
 // 回傳 true 表示成功抽完
@@ -215,7 +234,12 @@ async function runLodge(li){
     const bed = $(`bed-${li}-${bi}`);
     for(let k=0;k<lodgings[li].beds[bi].cap;k++){
       const seat = $(`seat-${li}-${bi}-${k}`), who = result[`${bi}-${k}`];
-      if(who){ await spin(seat, bed, people.filter(p=>!used.includes(p)), who); used.push(who); }
+      if(who){
+        const left = people.filter(p=>!used.includes(p));
+        if(left.length===1) await settle(seat, bed, who);   // 只剩最後一人：不用跑抽籤
+        else await spin(seat, bed, left, who);
+        used.push(who);
+      }
       else { seat.textContent = "空著"; seat.classList.add("done"); }
     }
     bed.classList.remove("active"); bed.classList.add("filled");
